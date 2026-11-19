@@ -1,0 +1,30 @@
+pipeline {
+  agent any
+  stages {
+    stage('Checkout') {
+      steps { checkout scm }
+    }
+    stage('Build') {
+      steps {
+        dir('frontend') {
+          bat 'npm ci'
+          bat 'npm run build'
+        }
+        dir('backend') { bat 'npm ci' }
+      }
+    }
+    stage('Docker smoke test') {
+      steps {
+        bat 'docker compose build'
+        bat 'docker compose up -d'
+        bat 'curl.exe --fail --retry 20 --retry-connrefused --retry-delay 2 http://localhost:5000/api/health'
+        bat 'curl.exe --fail http://localhost:5173/'
+      }
+    }
+  }
+  post {
+    always {
+      bat 'docker compose down'
+    }
+  }
+}

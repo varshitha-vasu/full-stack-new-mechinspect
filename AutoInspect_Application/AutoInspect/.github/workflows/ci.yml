@@ -1,0 +1,44 @@
+name: AutoInspect CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  docker-integration:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Start application
+        run: docker compose up --build --detach
+
+      - name: Verify database and API
+        run: |
+          for attempt in {1..30}; do
+            if curl --silent --fail http://localhost:5000/api/health | jq -e '.database == "connected"' >/dev/null; then
+              exit 0
+            fi
+            sleep 2
+          done
+          docker compose logs
+          exit 1
+
+      - name: Verify frontend proxy and inspection CRUD
+        run: |
+          curl --fail --silent http://localhost:5173/ >/dev/null
+          curl --fail --silent http://localhost:5173/api/health | jq -e '.database == "connected"'
+          inspection_id=$(curl --fail --silent --show-error \
+            -H 'Content-Type: application/json' \
+            -d '{"component":"CI Test Part","partNo":"CI-001","inspector":"CI","line":"Line A","date":"2026-11-19","result":"Pass","defect":"—","remarks":"Container integration test"}' \
+            http://localhost:5173/api/inspections | jq -r '._id')
+          curl --fail --silent http://localhost:5173/api/inspections/"$inspection_id" |
+            jq -e '.component == "CI Test Part"'
+          curl --fail --silent -X DELETE http://localhost:5173/api/inspections/"$inspection_id" |
+            jq -e '.message == "Inspection deleted"'
+
+      - name: Stop application
+        if: always()
+        run: docker compose down --volumes
